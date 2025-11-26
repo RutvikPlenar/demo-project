@@ -1,0 +1,62 @@
+FROM php:7.4-apache
+
+# Install system packages and PHP extensions
+RUN apt-get update && apt-get install -y \
+    cron \
+    git \
+    unzip \
+    libpq-dev \
+    libzip-dev \
+    && docker-php-ext-install pdo pdo_mysql zip \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Composer
+COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
+
+# Enable Apache modules required for Laravel
+RUN a2enmod rewrite headers deflate
+
+# Set working directory
+WORKDIR /var/www/demo-project
+
+# Copy composer files first for better layer caching
+COPY composer.json composer.lock ./
+
+# Install dependencies (this layer will be cached if composer files don't change)
+RUN composer install --no-dev --no-interaction --prefer-dist --no-scripts --no-autoloader
+
+# Copy application files
+COPY . .
+
+# Complete composer installation with scripts and autoloader
+RUN composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader
+
+# Set proper permissions for Laravel
+RUN chown -R www-data:www-data /var/www/demo-project \
+    && chmod -R 755 /var/www/demo-project/storage \
+    && chmod -R 755 /var/www/demo-project/bootstrap/cache
+
+# Copy custom Apache configuration
+COPY docker/apache/laravel.conf /etc/apache2/sites-available/000-default.conf
+
+# Configure Apache DocumentRoot to Laravel's public directory (fallback if not using custom conf)
+ENV APACHE_DOCUMENT_ROOT=/var/www/demo-project/public
+
+# Copy and configure cron
+COPY docker/cron/laravel-cron /etc/cron.d/laravel-cron
+RUN chmod 0644 /etc/cron.d/laravel-cron \
+    && crontab /etc/cron.d/laravel-cron \
+    && touch /var/log/cron.log
+
+# Create startup script to run both cron and Apache
+RUN echo '#!/bin/bash\n\
+    cron\n\
+    apache2-foreground' > /usr/local/bin/start.sh \
+    && chmod +x /usr/local/bin/start.sh
+
+# Expose port 80
+EXPOSE 80
+
+# Start both cron and Apache
+CMD ["/usr/local/bin/start.sh"]

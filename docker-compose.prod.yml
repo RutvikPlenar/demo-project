@@ -1,0 +1,27 @@
+services:
+  app:
+    image: 192.168.1.101:5000/demo-project:latest
+    container_name: demo-project
+    restart: unless-stopped
+    working_dir: /var/www/demo-project
+    ports:
+      - "7001:80"
+    volumes:
+      # Only mount persistent data, not the entire codebase
+      - ./storage:/var/www/demo-project/storage
+      - ./bootstrap/cache:/var/www/demo-project/bootstrap/cache
+      # Mount public directory so host nginx can serve static files
+      # - ./public:/var/www/demo-project/public
+    networks:
+      - demo-project
+    # Health check for the PHP-FPM service
+    healthcheck:
+      test: [ "CMD-SHELL", "php-fpm -t || exit 1" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  demo-project:
+    driver: bridge
